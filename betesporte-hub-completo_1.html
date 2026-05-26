@@ -32,10 +32,6 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-body);fo
 .save-indicator.show{opacity:1}
 .live-clock-sm{font-family:var(--font-head);font-size:15px;font-weight:700;color:var(--accent2);letter-spacing:1px}
 .live-date-sm{font-size:11px;color:var(--text3);letter-spacing:.2px}
-.role-wrap{display:flex;align-items:center;gap:8px}
-.role-wrap label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
-.role-wrap select{font-size:12px;padding:6px 10px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--bg3);color:var(--text);cursor:pointer;font-family:var(--font-body);outline:none;transition:border-color .2s}
-.role-wrap select:hover{border-color:var(--accent)}
 .reset-btn{font-size:11px;padding:5px 12px;border-radius:var(--radius);border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:all .2s;font-family:var(--font-body)}
 .reset-btn:hover{border-color:var(--red);color:var(--red)}
 .nav{display:flex;gap:6px;margin-bottom:2rem;flex-wrap:wrap;background:var(--bg2);padding:6px;border-radius:var(--radius-lg);border:1px solid var(--border)}
@@ -411,7 +407,7 @@ tr:hover td{background:rgba(37,99,235,.04)}
       </div>
     </div>
     <button class="logout-btn" id="logout-btn" style="display:none" onclick="logout()"><i class="ti ti-logout"></i> Sair</button>
-    <button class="reset-btn" onclick="confirmReset()" title="Resetar dados" id="reset-btn" style="display:none"><i class="ti ti-refresh"></i></button>
+    <button class="reset-btn" onclick="confirmReset()" title="Resetar dados (Admin)" id="reset-btn" style="display:none"><i class="ti ti-refresh"></i></button>
   </div>
 </div>
 
@@ -859,7 +855,8 @@ async function loadAll(){
     currentQuadroId=quadros[0].id;
   }catch(e){}
   applyRoles();renderInf();renderProd();renderCamp();renderMsgs();updateCounts();
-  persist();
+  const needsMigration=['betesporte_influenciadores','betesporte_produtos','betesporte_campanhas','betesporte_mensagens','betesporte_demandas','betesporte_quadros'].some(k=>{const v=localStorage.getItem(k);return v&&!v.startsWith('enc:');});
+  if(needsMigration)persist();
 }
 async function persist(keys){
   async function sv(key,val){localStorage.setItem(key,await encryptStr(JSON.stringify(val)));}
@@ -895,8 +892,9 @@ function goTo(id){
 function changeRole(r){
   currentRole=r;const R=ROLES[r];
   const al=document.getElementById('role-alert'),at=document.getElementById('role-alert-text');
-  if(R.nivel<=3){al.className='alert alert-green';at.innerHTML='Visualizando como <strong>'+R.label+'</strong> — acesso gerencial completo.';}
-  else{al.className='alert alert-amber';at.innerHTML='Visualizando como <strong>'+R.label+'</strong> — dados financeiros são restritos ao seu nível.';}
+  const nome=currentUser?currentUser.name.split(' ')[0]:R.label;
+  if(R.nivel<=3){al.className='alert alert-green';at.innerHTML='Conectado como <strong>'+nome+'</strong> ('+R.label+') — acesso gerencial completo.';}
+  else{al.className='alert alert-amber';at.innerHTML='Conectado como <strong>'+nome+'</strong> ('+R.label+') — dados financeiros restritos ao seu nível.';}
   applyRoles();renderInf();renderProd();renderCamp();renderMsgs();
   const active=document.querySelector('.section.active');
   if(active&&active.id==='sec-metricas')renderMetricas();
@@ -1230,7 +1228,7 @@ function saveCamp(){
 function delInf(i){if(confirm('Remover?')){const nome=influenciadores[i].nome;influenciadores.splice(i,1);campanhas.forEach(c=>{c.influenciadores=(c.influenciadores||[]).filter(n=>n!==nome);});persist(['inf','camp']);renderInf();renderCamp();}}
 function delProd(i){if(confirm('Remover?')){produtos.splice(i,1);persist(['prod']);renderProd();}}
 function delCamp(i){if(confirm('Remover?')){campanhas.splice(i,1);persist(['camp']);renderCamp();renderInf();}}
-function confirmReset(){if(confirm('Apagar todos os dados?')){influenciadores=[];produtos=[];campanhas=[];mensagens=[];lidas=new Set();eventos=[];demandas=[];quadros=[{id:1,nome:'Designer',cor:'#FBBF24'},{id:2,nome:'Vídeomaker',cor:'#C084FC'}];currentQuadroId=1;persist();renderInf();renderProd();renderCamp();renderMsgs();renderCalendar();renderKanban();updateCounts();}}
+function confirmReset(){if(confirm('Apagar TODOS os dados? Esta ação não pode ser desfeita.')){influenciadores=[];produtos=[];campanhas=[];mensagens=[];lidas=new Set();eventos=[];demandas=[];quadros=[{id:1,nome:'Designer',cor:'#FBBF24'},{id:2,nome:'Vídeomaker',cor:'#C084FC'}];kbCols=KB_COLS_DEFAULT.map(c=>({...c}));currentQuadroId=1;persist();renderInf();renderProd();renderCamp();renderMsgs();renderCalendar();renderKanban();updateCounts();}}
 
 function selectRelType(t){relType=t;document.querySelectorAll('.rel-option').forEach(el=>el.classList.remove('selected'));document.getElementById('rt-'+t).classList.add('selected');}
 function goRelStep(n){document.getElementById('rel-step-1').style.display=n===1?'block':'none';document.getElementById('rel-step-2').style.display=n===2?'block':'none';document.getElementById('rel-step-3').style.display=n===3?'block':'none';if(n===2){const sections=SECTIONS_BY_TYPE[relType]||[];document.getElementById('sections-list').innerHTML=sections.map(s=>'<label class="check-item"><input type="checkbox" id="sec-'+s.id+'" '+(s.checked?'checked':'')+'>'+s.label+'<div class="ci-desc">'+s.desc+'</div></label>').join('');}if(n===3)gerarPrevia();}
@@ -1686,7 +1684,7 @@ function showUserBadge(){
   const resetBtn=document.getElementById('reset-btn');
   if(wrap)wrap.style.display='block';
   if(logoutBtn)logoutBtn.style.display='inline-flex';
-  if(resetBtn)resetBtn.style.display='inline-flex';
+  if(resetBtn)resetBtn.style.display=ROLES[currentRole].nivel<=2?'inline-flex':'none';
   if(img&&currentUser.picture){img.src=currentUser.picture;}
   if(nameEl)nameEl.textContent=currentUser.name.split(' ')[0];
   const R=ROLES[currentRole];
@@ -1701,24 +1699,45 @@ function logout(){
   if(!confirm('Deseja sair do Marketing Hub?'))return;
   if(typeof google!=='undefined')google.accounts.id.disableAutoSelect();
   currentUser=null;
+  HUB_KEY=null;
   clearTimeout(inactivityTimer);
-  document.removeEventListener('mousemove',resetInactivity);
-  document.removeEventListener('keydown',resetInactivity);
+  stopInactivityWatch();
   document.getElementById('login-overlay').style.display='flex';
   document.getElementById('user-badge-wrap').style.display='none';
   document.getElementById('logout-btn').style.display='none';
   document.getElementById('reset-btn').style.display='none';
 }
 
-function resetInactivity(){
-  clearTimeout(inactivityTimer);
-  inactivityTimer=setTimeout(()=>{alert('Sessão encerrada por inatividade (30 min).');logout();},INACTIVITY_MS);
+function showInactivityModal(){
+  let overlay=document.getElementById('inactivity-overlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='inactivity-overlay';
+    overlay.style.cssText='position:fixed;inset:0;background:rgba(10,10,15,.85);z-index:10000;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:18px;padding:36px 32px;max-width:340px;width:90%;text-align:center;display:flex;flex-direction:column;gap:16px"><div style="font-size:36px">⏱️</div><div style="font-family:var(--font-head);font-size:17px;font-weight:700">Sessão encerrada</div><div style="font-size:13px;color:var(--text3)">Você ficou inativo por 30 minutos. Por segurança, sua sessão foi encerrada.</div><button onclick="document.getElementById(\'inactivity-overlay\').remove();logout();" style="background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font-body)">Fazer login novamente</button></div>';
+    document.body.appendChild(overlay);
+  }
 }
 
+let inactivityWatching=false;
+function resetInactivity(){
+  clearTimeout(inactivityTimer);
+  inactivityTimer=setTimeout(()=>{showInactivityModal();HUB_KEY=null;currentUser=null;stopInactivityWatch();},INACTIVITY_MS);
+}
 function startInactivityWatch(){
+  if(inactivityWatching)stopInactivityWatch();
   document.addEventListener('mousemove',resetInactivity);
   document.addEventListener('keydown',resetInactivity);
+  document.addEventListener('click',resetInactivity);
+  inactivityWatching=true;
   resetInactivity();
+}
+function stopInactivityWatch(){
+  document.removeEventListener('mousemove',resetInactivity);
+  document.removeEventListener('keydown',resetInactivity);
+  document.removeEventListener('click',resetInactivity);
+  clearTimeout(inactivityTimer);
+  inactivityWatching=false;
 }
 </script>
 
