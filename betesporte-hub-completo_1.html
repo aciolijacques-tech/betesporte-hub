@@ -7,7 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --bg:#0A0A0F;--bg2:#0E1420;--bg3:#141E2E;--border:#1E2D45;--border2:#2A3F5F;
@@ -368,20 +370,10 @@ tr:hover td{background:rgba(37,99,235,.04)}
     <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px">Marketing Hub</div>
     <div class="login-divider"></div>
     <p class="login-sub">Acesse com sua conta Google autorizada pela equipe</p>
-    <div id="g_id_onload"
-      data-client_id="586326209837-l1lpifjdii9fe2mgak4hf1ql6gl8v4qe.apps.googleusercontent.com"
-      data-callback="handleCredentialResponse"
-      data-auto_prompt="false">
-    </div>
-    <div class="g_id_signin"
-      data-type="standard"
-      data-shape="pill"
-      data-theme="filled_black"
-      data-text="signin_with"
-      data-size="large"
-      data-logo_alignment="left"
-      data-width="280">
-    </div>
+    <button onclick="signInWithGoogle()" id="btn-google-login" style="background:#fff;color:#1f1f1f;border:none;border-radius:24px;padding:12px 24px;font-size:14px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:10px;font-family:var(--font-body);transition:opacity .2s">
+      <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.706c-.18-.54-.282-1.117-.282-1.706s.102-1.166.282-1.706V4.962H.957C.347 6.175 0 7.55 0 9s.348 2.825.957 4.038l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+      Entrar com Google
+    </button>
     <p class="login-error" id="login-error">⛔ Acesso não autorizado. Fale com o administrador.</p>
   </div>
 </div>
@@ -809,69 +801,82 @@ function updateClock(){
 }
 setInterval(updateClock,1000);updateClock();
 
-// STORAGE
-// ===== CRYPTO =====
-let HUB_KEY=null;
-async function initCrypto(sub){
-  const enc=new TextEncoder();
-  const raw=await crypto.subtle.importKey('raw',enc.encode(sub),{name:'PBKDF2'},false,['deriveKey']);
-  HUB_KEY=await crypto.subtle.deriveKey(
-    {name:'PBKDF2',salt:enc.encode('betesporte-hub-v1'),iterations:100000,hash:'SHA-256'},
-    raw,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
-}
-async function encryptStr(plain){
-  if(!HUB_KEY)return plain;
-  const enc=new TextEncoder();
-  const iv=crypto.getRandomValues(new Uint8Array(12));
-  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},HUB_KEY,enc.encode(plain));
-  const buf=new Uint8Array(12+ct.byteLength);buf.set(iv);buf.set(new Uint8Array(ct),12);
-  return'enc:'+btoa(String.fromCharCode(...buf));
-}
-async function decryptStr(data){
-  if(!HUB_KEY||!data||!data.startsWith('enc:'))return data;
-  try{
-    const buf=Uint8Array.from(atob(data.slice(4)),c=>c.charCodeAt(0));
-    const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:buf.slice(0,12)},HUB_KEY,buf.slice(12));
-    return new TextDecoder().decode(pt);
-  }catch{return data;}
-}
+// ===== FIREBASE =====
+const firebaseConfig={
+  apiKey:'AIzaSyBRuzAH3XbeWMYKmYrLgaj_fzsl-JKcy7M',
+  authDomain:'betesporte-hub-52f65.firebaseapp.com',
+  projectId:'betesporte-hub-52f65',
+  storageBucket:'betesporte-hub-52f65.firebasestorage.app',
+  messagingSenderId:'1076157313861',
+  appId:'1:1076157313861:web:fc737468a70d021e70842c'
+};
+firebase.initializeApp(firebaseConfig);
+const auth=firebase.auth();
+const db=firebase.firestore();
+const HUB_COL='hub_data';
+let realtimeUnsubs=[];
 
 async function loadAll(){
   async function rd(key){
-    const raw=localStorage.getItem(key);if(!raw)return null;
-    try{return JSON.parse(await decryptStr(raw));}catch{return null;}
+    const doc=await db.collection(HUB_COL).doc(key).get();
+    return doc.exists?doc.data().data:null;
   }
   try{
-    const ri=await rd('betesporte_influenciadores');if(ri)influenciadores=ri;
-    const rp=await rd('betesporte_produtos');if(rp)produtos=rp;
-    const rc=await rd('betesporte_campanhas');if(rc)campanhas=rc;
-    const rm=await rd('betesporte_mensagens');if(rm)mensagens=rm;
-    const rl=await rd('betesporte_lidas');if(rl)lidas=new Set(rl);
-    const re=await rd('betesporte_calendario_eventos');if(re)eventos=re;
-    const rdem=await rd('betesporte_demandas');if(rdem)demandas=rdem;
-    const rq=await rd('betesporte_quadros');if(rq)quadros=rq;
-    const rcols=await rd('betesporte_colunas');if(rcols)kbCols=rcols;
+    const ri=await rd('influenciadores');if(ri)influenciadores=ri;
+    const rp=await rd('produtos');if(rp)produtos=rp;
+    const rc=await rd('campanhas');if(rc)campanhas=rc;
+    const rm=await rd('mensagens');if(rm)mensagens=rm;
+    const re=await rd('eventos');if(re)eventos=re;
+    const rdem=await rd('demandas');if(rdem)demandas=rdem;
+    const rq=await rd('quadros');if(rq)quadros=rq;
+    const rcols=await rd('kbCols');if(rcols)kbCols=rcols;
+    const userPref=await db.collection('user_prefs').doc(currentUser.uid).get();
+    if(userPref.exists&&userPref.data().lidas)lidas=new Set(userPref.data().lidas);
     if(quadros.length===0||quadros.every(q=>q.nome==='Principal')){const oldId=quadros[0]?.id;quadros=[{id:1,nome:'Designer',cor:'#FBBF24'},{id:2,nome:'Vídeomaker',cor:'#C084FC'}];demandas.forEach(d=>{if(!d.quadroId||(oldId&&d.quadroId===oldId))d.quadroId=1;});}
     currentQuadroId=quadros[0].id;
-  }catch(e){}
+  }catch(e){console.error('loadAll',e);}
   applyRoles();renderInf();renderProd();renderCamp();renderMsgs();updateCounts();
-  const needsMigration=['betesporte_influenciadores','betesporte_produtos','betesporte_campanhas','betesporte_mensagens','betesporte_demandas','betesporte_quadros'].some(k=>{const v=localStorage.getItem(k);return v&&!v.startsWith('enc:');});
-  if(needsMigration)persist();
+  setupRealtimeListeners();
 }
+
 async function persist(keys){
-  async function sv(key,val){localStorage.setItem(key,await encryptStr(JSON.stringify(val)));}
+  if(!currentUser)return;
+  async function sv(key,val){await db.collection(HUB_COL).doc(key).set({data:val});}
   try{
-    if(!keys||keys.includes('inf'))await sv('betesporte_influenciadores',influenciadores);
-    if(!keys||keys.includes('prod'))await sv('betesporte_produtos',produtos);
-    if(!keys||keys.includes('camp'))await sv('betesporte_campanhas',campanhas);
-    if(!keys||keys.includes('msg')){await sv('betesporte_mensagens',mensagens);await sv('betesporte_lidas',[...lidas]);}
-    if(!keys||keys.includes('ev'))await sv('betesporte_calendario_eventos',eventos);
-    if(!keys||keys.includes('dem'))await sv('betesporte_demandas',demandas);
-    if(!keys||keys.includes('qdr'))await sv('betesporte_quadros',quadros);
-    if(!keys||keys.includes('cols'))await sv('betesporte_colunas',kbCols);
+    if(!keys||keys.includes('inf'))await sv('influenciadores',influenciadores);
+    if(!keys||keys.includes('prod'))await sv('produtos',produtos);
+    if(!keys||keys.includes('camp'))await sv('campanhas',campanhas);
+    if(!keys||keys.includes('msg'))await sv('mensagens',mensagens);
+    if(!keys||keys.includes('ev'))await sv('eventos',eventos);
+    if(!keys||keys.includes('dem'))await sv('demandas',demandas);
+    if(!keys||keys.includes('qdr'))await sv('quadros',quadros);
+    if(!keys||keys.includes('cols'))await sv('kbCols',kbCols);
+    if(!keys||keys.includes('msg'))await db.collection('user_prefs').doc(currentUser.uid).set({lidas:[...lidas]},{merge:true});
     const ind=document.getElementById('save-indicator');ind.classList.add('show');
     clearTimeout(saveTimer);saveTimer=setTimeout(()=>ind.classList.remove('show'),2500);
-  }catch(e){}
+  }catch(e){console.error('persist',e);}
+}
+
+function setupRealtimeListeners(){
+  realtimeUnsubs.forEach(u=>u());realtimeUnsubs=[];
+  const maps={influenciadores:()=>{renderInf();},produtos:()=>{renderProd();},campanhas:()=>{renderCamp();renderInf();},mensagens:()=>{renderMsgs();updateCounts();},demandas:()=>{renderKanban();},quadros:()=>{},kbCols:()=>{renderKanban();}};
+  Object.keys(maps).forEach(key=>{
+    const unsub=db.collection(HUB_COL).doc(key).onSnapshot(doc=>{
+      if(!doc.exists||!currentUser)return;
+      const data=doc.data().data;
+      switch(key){
+        case'influenciadores':influenciadores=data;break;
+        case'produtos':produtos=data;break;
+        case'campanhas':campanhas=data;break;
+        case'mensagens':mensagens=data;break;
+        case'demandas':demandas=data;break;
+        case'quadros':quadros=data;if(data.length)currentQuadroId=currentQuadroId||data[0].id;break;
+        case'kbCols':kbCols=data;break;
+      }
+      maps[key]();
+    });
+    realtimeUnsubs.push(unsub);
+  });
 }
 
 function goTo(id){
@@ -1650,31 +1655,44 @@ function clearThumb(){demThumb='';const prev=document.getElementById('dem-thumb-
 
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeEventModal();closeViewEventModal();['perfil','camp-detail','view-msg','msg','inf','prod','camp','demanda','quadro','coluna'].forEach(t=>{const el=document.getElementById('modal-'+t);if(el)el.classList.remove('open');});}});
 
-// ===== GOOGLE AUTH =====
+// ===== AUTH =====
 const ALLOWED_USERS={
   'aciolijacques@gmail.com':'designer'
 };
 let currentUser=null,inactivityTimer=null;
 const INACTIVITY_MS=30*60*1000;
 
-async function handleCredentialResponse(response){
-  try{
-    const payload=JSON.parse(atob(response.credential.split('.')[1]));
-    const email=payload.email;
-    const role=ALLOWED_USERS[email];
+function signInWithGoogle(){
+  const btn=document.getElementById('btn-google-login');
+  if(btn)btn.style.opacity='0.6';
+  const provider=new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(err=>{
+    console.error('Login error',err);
+    if(btn)btn.style.opacity='1';
+  });
+}
+
+auth.onAuthStateChanged(async user=>{
+  if(user){
+    const role=ALLOWED_USERS[user.email];
     if(!role){
+      await auth.signOut();
       document.getElementById('login-error').style.display='block';
       return;
     }
-    currentUser={email,name:payload.name,picture:payload.picture,role};
+    currentUser={email:user.email,name:user.displayName,picture:user.photoURL,role,uid:user.uid};
     currentRole=role;
     document.getElementById('login-overlay').style.display='none';
     showUserBadge();
-    await initCrypto(payload.sub);
     await loadAll();
     startInactivityWatch();
-  }catch(e){console.error('Auth error',e);}
-}
+  }else{
+    realtimeUnsubs.forEach(u=>u());realtimeUnsubs=[];
+    currentUser=null;
+    document.getElementById('login-overlay').style.display='flex';
+    const btn=document.getElementById('btn-google-login');if(btn)btn.style.opacity='1';
+  }
+});
 
 function showUserBadge(){
   const wrap=document.getElementById('user-badge-wrap');
@@ -1697,15 +1715,11 @@ function showUserBadge(){
 
 function logout(){
   if(!confirm('Deseja sair do Marketing Hub?'))return;
-  if(typeof google!=='undefined')google.accounts.id.disableAutoSelect();
-  currentUser=null;
-  HUB_KEY=null;
-  clearTimeout(inactivityTimer);
   stopInactivityWatch();
-  document.getElementById('login-overlay').style.display='flex';
   document.getElementById('user-badge-wrap').style.display='none';
   document.getElementById('logout-btn').style.display='none';
   document.getElementById('reset-btn').style.display='none';
+  auth.signOut();
 }
 
 function showInactivityModal(){
@@ -1714,7 +1728,7 @@ function showInactivityModal(){
     overlay=document.createElement('div');
     overlay.id='inactivity-overlay';
     overlay.style.cssText='position:fixed;inset:0;background:rgba(10,10,15,.85);z-index:10000;display:flex;align-items:center;justify-content:center';
-    overlay.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:18px;padding:36px 32px;max-width:340px;width:90%;text-align:center;display:flex;flex-direction:column;gap:16px"><div style="font-size:36px">⏱️</div><div style="font-family:var(--font-head);font-size:17px;font-weight:700">Sessão encerrada</div><div style="font-size:13px;color:var(--text3)">Você ficou inativo por 30 minutos. Por segurança, sua sessão foi encerrada.</div><button onclick="document.getElementById(\'inactivity-overlay\').remove();logout();" style="background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font-body)">Fazer login novamente</button></div>';
+    overlay.innerHTML='<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:18px;padding:36px 32px;max-width:340px;width:90%;text-align:center;display:flex;flex-direction:column;gap:16px"><div style="font-size:36px">⏱️</div><div style="font-family:var(--font-head);font-size:17px;font-weight:700">Sessão encerrada</div><div style="font-size:13px;color:var(--text3)">Você ficou inativo por 30 minutos. Por segurança, sua sessão foi encerrada.</div><button onclick="document.getElementById(\'inactivity-overlay\').remove();stopInactivityWatch();auth.signOut();" style="background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font-body)">Fazer login novamente</button></div>';
     document.body.appendChild(overlay);
   }
 }
@@ -1722,7 +1736,7 @@ function showInactivityModal(){
 let inactivityWatching=false;
 function resetInactivity(){
   clearTimeout(inactivityTimer);
-  inactivityTimer=setTimeout(()=>{showInactivityModal();HUB_KEY=null;currentUser=null;stopInactivityWatch();},INACTIVITY_MS);
+  inactivityTimer=setTimeout(()=>{showInactivityModal();stopInactivityWatch();},INACTIVITY_MS);
 }
 function startInactivityWatch(){
   if(inactivityWatching)stopInactivityWatch();
