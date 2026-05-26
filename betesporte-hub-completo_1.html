@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 :root{
   --bg:#0A0A0F;--bg2:#0E1420;--bg3:#141E2E;--border:#1E2D45;--border2:#2A3F5F;
@@ -348,9 +349,47 @@ tr:hover td{background:rgba(37,99,235,.04)}
 .col-chk{display:flex;align-items:center;gap:9px;padding:7px 10px;border:1px solid var(--border2);border-radius:9px;cursor:pointer;font-size:12px;transition:border-color .18s}
 .col-chk:hover{border-color:var(--accent2)}
 .col-chk input{accent-color:var(--accent);width:14px;height:14px;flex-shrink:0}
+/* LOGIN */
+.login-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999}
+.login-box{background:var(--bg2);border:1px solid var(--border2);border-radius:24px;padding:48px 40px;display:flex;flex-direction:column;align-items:center;gap:18px;max-width:380px;width:90%;text-align:center}
+.login-logo{font-family:var(--font-head);font-weight:800;font-size:26px;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.login-divider{width:100%;height:1px;background:var(--border)}
+.login-sub{font-size:13px;color:var(--text3);line-height:1.6}
+.login-error{font-size:12px;color:var(--red);display:none}
+.user-badge{display:flex;align-items:center;gap:7px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px 3px 3px}
+.user-avatar{width:26px;height:26px;border-radius:50%;object-fit:cover;display:block}
+.user-name{font-size:11px;color:var(--text2);font-weight:500;white-space:nowrap}
+.logout-btn{font-size:11px;padding:5px 12px;border-radius:var(--radius);border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:all .2s;font-family:var(--font-body);display:inline-flex;align-items:center;gap:4px}
+.logout-btn:hover{border-color:var(--red);color:var(--red)}
 </style>
 </head>
 <body>
+
+<!-- LOGIN OVERLAY -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-box">
+    <div class="login-logo">BETesporte</div>
+    <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px">Marketing Hub</div>
+    <div class="login-divider"></div>
+    <p class="login-sub">Acesse com sua conta Google autorizada pela equipe</p>
+    <div id="g_id_onload"
+      data-client_id="586326209837-l1lpifjdii9fe2mgak4hf1ql6gl8v4qe.apps.googleusercontent.com"
+      data-callback="handleCredentialResponse"
+      data-auto_prompt="false">
+    </div>
+    <div class="g_id_signin"
+      data-type="standard"
+      data-shape="pill"
+      data-theme="filled_black"
+      data-text="signin_with"
+      data-size="large"
+      data-logo_alignment="left"
+      data-width="280">
+    </div>
+    <p class="login-error" id="login-error">⛔ Acesso não autorizado. Fale com o administrador.</p>
+  </div>
+</div>
+
 <div class="hub" id="app">
 
 <div class="top-bar">
@@ -365,14 +404,14 @@ tr:hover td{background:rgba(37,99,235,.04)}
       <span class="live-date-sm" id="live-date-sm">—</span>
     </div>
     <span class="save-indicator" id="save-indicator"><i class="ti ti-check"></i>Salvo</span>
-    <div class="role-wrap"><label>Perfil</label>
-      <select id="roleSelect" onchange="changeRole(this.value)">
-        <option value="cmo">CMO</option><option value="diretor">Diretor</option>
-        <option value="gerente">Gerente</option><option value="coordenador">Coordenador</option>
-        <option value="social_media" selected>Social Media</option><option value="video_maker">Vídeomaker</option><option value="designer">Designer</option>
-      </select>
+    <div id="user-badge-wrap" style="display:none">
+      <div class="user-badge">
+        <img id="user-avatar-img" class="user-avatar" src="" alt="">
+        <span id="user-name-text" class="user-name"></span>
+      </div>
     </div>
-    <button class="reset-btn" onclick="confirmReset()" title="Resetar dados"><i class="ti ti-refresh"></i></button>
+    <button class="logout-btn" id="logout-btn" style="display:none" onclick="logout()"><i class="ti ti-logout"></i> Sair</button>
+    <button class="reset-btn" onclick="confirmReset()" title="Resetar dados" id="reset-btn" style="display:none"><i class="ti ti-refresh"></i></button>
   </div>
 </div>
 
@@ -1581,7 +1620,73 @@ function clearThumb(){demThumb='';const prev=document.getElementById('dem-thumb-
 
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeEventModal();closeViewEventModal();['perfil','camp-detail','view-msg','msg','inf','prod','camp','demanda','quadro','coluna'].forEach(t=>{const el=document.getElementById('modal-'+t);if(el)el.classList.remove('open');});}});
 
-loadAll();
+// ===== GOOGLE AUTH =====
+const ALLOWED_USERS={
+  'aciolijacques@gmail.com':'designer'
+};
+let currentUser=null,inactivityTimer=null;
+const INACTIVITY_MS=30*60*1000;
+
+function handleCredentialResponse(response){
+  try{
+    const payload=JSON.parse(atob(response.credential.split('.')[1]));
+    const email=payload.email;
+    const role=ALLOWED_USERS[email];
+    if(!role){
+      document.getElementById('login-error').style.display='block';
+      return;
+    }
+    currentUser={email,name:payload.name,picture:payload.picture,role};
+    currentRole=role;
+    document.getElementById('login-overlay').style.display='none';
+    showUserBadge();
+    loadAll();
+    startInactivityWatch();
+  }catch(e){console.error('Auth error',e);}
+}
+
+function showUserBadge(){
+  const wrap=document.getElementById('user-badge-wrap');
+  const img=document.getElementById('user-avatar-img');
+  const nameEl=document.getElementById('user-name-text');
+  const logoutBtn=document.getElementById('logout-btn');
+  const resetBtn=document.getElementById('reset-btn');
+  if(wrap)wrap.style.display='block';
+  if(logoutBtn)logoutBtn.style.display='inline-flex';
+  if(resetBtn)resetBtn.style.display='inline-flex';
+  if(img&&currentUser.picture){img.src=currentUser.picture;}
+  if(nameEl)nameEl.textContent=currentUser.name.split(' ')[0];
+  const R=ROLES[currentRole];
+  const al=document.getElementById('role-alert'),at=document.getElementById('role-alert-text');
+  if(al&&at){
+    if(R.nivel<=3){al.className='alert alert-green';at.innerHTML='Conectado como <strong>'+currentUser.name+'</strong> ('+R.label+') — acesso gerencial completo.';}
+    else{al.className='alert alert-amber';at.innerHTML='Conectado como <strong>'+currentUser.name+'</strong> ('+R.label+') — dados financeiros restritos ao seu nível.';}
+  }
+}
+
+function logout(){
+  if(!confirm('Deseja sair do Marketing Hub?'))return;
+  if(typeof google!=='undefined')google.accounts.id.disableAutoSelect();
+  currentUser=null;
+  clearTimeout(inactivityTimer);
+  document.removeEventListener('mousemove',resetInactivity);
+  document.removeEventListener('keydown',resetInactivity);
+  document.getElementById('login-overlay').style.display='flex';
+  document.getElementById('user-badge-wrap').style.display='none';
+  document.getElementById('logout-btn').style.display='none';
+  document.getElementById('reset-btn').style.display='none';
+}
+
+function resetInactivity(){
+  clearTimeout(inactivityTimer);
+  inactivityTimer=setTimeout(()=>{alert('Sessão encerrada por inatividade (30 min).');logout();},INACTIVITY_MS);
+}
+
+function startInactivityWatch(){
+  document.addEventListener('mousemove',resetInactivity);
+  document.addEventListener('keydown',resetInactivity);
+  resetInactivity();
+}
 </script>
 
 </body>
