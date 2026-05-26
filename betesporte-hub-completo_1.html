@@ -814,32 +814,64 @@ function updateClock(){
 setInterval(updateClock,1000);updateClock();
 
 // STORAGE
-function loadAll(){
+// ===== CRYPTO =====
+let HUB_KEY=null;
+async function initCrypto(sub){
+  const enc=new TextEncoder();
+  const raw=await crypto.subtle.importKey('raw',enc.encode(sub),{name:'PBKDF2'},false,['deriveKey']);
+  HUB_KEY=await crypto.subtle.deriveKey(
+    {name:'PBKDF2',salt:enc.encode('betesporte-hub-v1'),iterations:100000,hash:'SHA-256'},
+    raw,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function encryptStr(plain){
+  if(!HUB_KEY)return plain;
+  const enc=new TextEncoder();
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},HUB_KEY,enc.encode(plain));
+  const buf=new Uint8Array(12+ct.byteLength);buf.set(iv);buf.set(new Uint8Array(ct),12);
+  return'enc:'+btoa(String.fromCharCode(...buf));
+}
+async function decryptStr(data){
+  if(!HUB_KEY||!data||!data.startsWith('enc:'))return data;
   try{
-    const ri=localStorage.getItem('betesporte_influenciadores');if(ri)influenciadores=JSON.parse(ri);
-    const rp=localStorage.getItem('betesporte_produtos');if(rp)produtos=JSON.parse(rp);
-    const rc=localStorage.getItem('betesporte_campanhas');if(rc)campanhas=JSON.parse(rc);
-    const rm=localStorage.getItem('betesporte_mensagens');if(rm)mensagens=JSON.parse(rm);
-    const rl=localStorage.getItem('betesporte_lidas');if(rl)lidas=new Set(JSON.parse(rl));
-    const re=localStorage.getItem('betesporte_calendario_eventos');if(re)eventos=JSON.parse(re);
-    const rd=localStorage.getItem('betesporte_demandas');if(rd)demandas=JSON.parse(rd);
-    const rq=localStorage.getItem('betesporte_quadros');if(rq)quadros=JSON.parse(rq);
-    const rcols=localStorage.getItem('betesporte_colunas');if(rcols)kbCols=JSON.parse(rcols);
+    const buf=Uint8Array.from(atob(data.slice(4)),c=>c.charCodeAt(0));
+    const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:buf.slice(0,12)},HUB_KEY,buf.slice(12));
+    return new TextDecoder().decode(pt);
+  }catch{return data;}
+}
+
+async function loadAll(){
+  async function rd(key){
+    const raw=localStorage.getItem(key);if(!raw)return null;
+    try{return JSON.parse(await decryptStr(raw));}catch{return null;}
+  }
+  try{
+    const ri=await rd('betesporte_influenciadores');if(ri)influenciadores=ri;
+    const rp=await rd('betesporte_produtos');if(rp)produtos=rp;
+    const rc=await rd('betesporte_campanhas');if(rc)campanhas=rc;
+    const rm=await rd('betesporte_mensagens');if(rm)mensagens=rm;
+    const rl=await rd('betesporte_lidas');if(rl)lidas=new Set(rl);
+    const re=await rd('betesporte_calendario_eventos');if(re)eventos=re;
+    const rdem=await rd('betesporte_demandas');if(rdem)demandas=rdem;
+    const rq=await rd('betesporte_quadros');if(rq)quadros=rq;
+    const rcols=await rd('betesporte_colunas');if(rcols)kbCols=rcols;
     if(quadros.length===0||quadros.every(q=>q.nome==='Principal')){const oldId=quadros[0]?.id;quadros=[{id:1,nome:'Designer',cor:'#FBBF24'},{id:2,nome:'Vídeomaker',cor:'#C084FC'}];demandas.forEach(d=>{if(!d.quadroId||(oldId&&d.quadroId===oldId))d.quadroId=1;});}
     currentQuadroId=quadros[0].id;
   }catch(e){}
   applyRoles();renderInf();renderProd();renderCamp();renderMsgs();updateCounts();
+  persist();
 }
-function persist(keys){
+async function persist(keys){
+  async function sv(key,val){localStorage.setItem(key,await encryptStr(JSON.stringify(val)));}
   try{
-    if(!keys||keys.includes('inf'))localStorage.setItem('betesporte_influenciadores',JSON.stringify(influenciadores));
-    if(!keys||keys.includes('prod'))localStorage.setItem('betesporte_produtos',JSON.stringify(produtos));
-    if(!keys||keys.includes('camp'))localStorage.setItem('betesporte_campanhas',JSON.stringify(campanhas));
-    if(!keys||keys.includes('msg')){localStorage.setItem('betesporte_mensagens',JSON.stringify(mensagens));localStorage.setItem('betesporte_lidas',JSON.stringify([...lidas]));}
-    if(!keys||keys.includes('ev'))localStorage.setItem('betesporte_calendario_eventos',JSON.stringify(eventos));
-    if(!keys||keys.includes('dem'))localStorage.setItem('betesporte_demandas',JSON.stringify(demandas));
-    if(!keys||keys.includes('qdr'))localStorage.setItem('betesporte_quadros',JSON.stringify(quadros));
-    if(!keys||keys.includes('cols'))localStorage.setItem('betesporte_colunas',JSON.stringify(kbCols));
+    if(!keys||keys.includes('inf'))await sv('betesporte_influenciadores',influenciadores);
+    if(!keys||keys.includes('prod'))await sv('betesporte_produtos',produtos);
+    if(!keys||keys.includes('camp'))await sv('betesporte_campanhas',campanhas);
+    if(!keys||keys.includes('msg')){await sv('betesporte_mensagens',mensagens);await sv('betesporte_lidas',[...lidas]);}
+    if(!keys||keys.includes('ev'))await sv('betesporte_calendario_eventos',eventos);
+    if(!keys||keys.includes('dem'))await sv('betesporte_demandas',demandas);
+    if(!keys||keys.includes('qdr'))await sv('betesporte_quadros',quadros);
+    if(!keys||keys.includes('cols'))await sv('betesporte_colunas',kbCols);
     const ind=document.getElementById('save-indicator');ind.classList.add('show');
     clearTimeout(saveTimer);saveTimer=setTimeout(()=>ind.classList.remove('show'),2500);
   }catch(e){}
@@ -1627,7 +1659,7 @@ const ALLOWED_USERS={
 let currentUser=null,inactivityTimer=null;
 const INACTIVITY_MS=30*60*1000;
 
-function handleCredentialResponse(response){
+async function handleCredentialResponse(response){
   try{
     const payload=JSON.parse(atob(response.credential.split('.')[1]));
     const email=payload.email;
@@ -1640,7 +1672,8 @@ function handleCredentialResponse(response){
     currentRole=role;
     document.getElementById('login-overlay').style.display='none';
     showUserBadge();
-    loadAll();
+    await initCrypto(payload.sub);
+    await loadAll();
     startInactivityWatch();
   }catch(e){console.error('Auth error',e);}
 }
